@@ -1,0 +1,108 @@
+---
+name: 'Deploy Repository via rsync'
+description: 'A custom action to deploy a repository to a remote server using rsync.'
+
+inputs:
+  remote_host:
+    description: 'The remote host (IP or domain)'
+    required: true
+  ssh_user:
+    description: 'The SSH username'
+    required: true
+  ssh_private_key:
+    description: 'SSH Server private key'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Config action
+      id: config
+      shell: bash
+      run: |
+        sudo apt-get update -q && sudo apt-get install -y rsync sshpass
+
+        mkdir -p ~/.ssh output
+        ssh-keyscan -H "${{ inputs.remote_host }}" >> ~/.ssh/known_hosts
+
+        ACTION_PATH="${{ github.action_path }}"
+        TAG_NAME=$(basename "$ACTION_PATH")
+        echo "ACTION_TAG=$TAG_NAME" >> $GITHUB_ENV
+        echo "Tag name: $TAG_NAME"
+
+        echo "::set-output name=ACTION_TAG::$TAG_NAME"
+        echo "CHECKOUT_DIR=git_checkout" >> $GITHUB_ENV
+        echo "ACTION_DIR=action_dir" >> $GITHUB_ENV
+        echo "IGNORE_FILE=action_dir/ignore_files.txt" >> $GITHUB_ENV
+        echo "OUTPUT_DIR=output" >> $GITHUB_ENV
+        echo "SYNC_FILE_LIST=output/files_to_sync.txt" >> $GITHUB_ENV
+        echo "REMOTE_DIR=/html/deployer" >> $GITHUB_ENV
+        echo "SSH_USER=${{ inputs.ssh_user }}" >> $GITHUB_ENV
+        echo "SSH_HOST=${{ inputs.remote_host }}" >> $GITHUB_ENV
+
+        TAR_NAME="repository_$(openssl rand -hex 4).tar.gz"
+        echo "TAR_NAME=$TAR_NAME" >> $GITHUB_ENV
+        echo "TAR_FILE=output/$TAR_NAME" >> $GITHUB_ENV
+        
+        TEMP_KEY_FILE="private_key"
+        echo "${{ inputs.ssh_private_key }}" > "$TEMP_KEY_FILE"
+        chmod 600 "$TEMP_KEY_FILE"
+        echo "TEMP_KEY_FILE=$TEMP_KEY_FILE" >> $GITHUB_ENV
+
+    - name: Checkout repository
+      with:
+        path: git_checkout
+      uses: actions/checkout@v3
+
+    - name: Checkout Action
+      with:
+        path: action_dir
+        repository: narethiya-godaddy/git-deploy-poc
+        ref: ${{ steps.config.outputs.ACTION_TAG }}
+      uses: actions/checkout@v3
+
+    - name: Create tar file
+      shell: bash
+      run: |
+        EXCLUDE_ARGS=""
+        while IFS= read -r line; do
+          EXCLUDE_ARGS+="--exclude=$line "
+        done < "$IGNORE_FILE"
+
+        echo "Preparing a changed file list..."
+        rsync -av --dry-run --checksum -e "ssh -i $TEMP_KEY_FILE -o StrictHostKeyChecking=no" $EXCLUDE_ARGS $CHECKOUT_DIR/ "$SSH_USER@$SSH_HOST:/html/" | grep -v '/$' > $SYNC_FILE_LIST
+        sed -i '1d;N;$!P;$!D;$d;$d' "$SYNC_FILE_LIST"
+
+        echo "Files to be synchronized:"
+        cat "$SYNC_FILE_LIST"
+        echo "End of list."
+
+        cd $CHECKOUT_DIR
+        echo "Creating tar file: $TAR_FILE"
+        tar -czvf "../$TAR_FILE" -T "../$SYNC_FILE_LIST"
+        cd ../
+        echo "Tar file created successfully."
+
+    - name: Upload tar file to server
+      shell: bash
+      run: |
+        echo "Creating remote directory: $REMOTE_DIR"
+        ssh -i $TEMP_KEY_FILE -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "mkdir -p '$REMOTE_DIR' || exit 1"
+        echo "Uploading tar file to $REMOTE_DIR"
+
+        rsync -avz --delete -e "ssh -i $TEMP_KEY_FILE -o StrictHostKeyChecking=no" $TAR_FILE "$SSH_USER@$SSH_HOST:$REMOTE_DIR/"
+        echo "Tar file uploaded successfully."
+
+    - name: Clean up
+      shell: bash
+      run: |
+        echo "Cleaning up temporary files..."
+        rm -rf $OUTPUT_DIR $CHECKOUT_DIR $ACTION_DIR
+        echo "Temporary files cleaned up successfully."
+
+    - name: Run Deployer
+      shell: bash
+      run: |
+        echo "Run Server deployer"
+        ssh -i $TEMP_KEY_FILE -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "/html/deployer.sh $TAR_NAME || exit 1"
+        rm -f $TEMP_KEY_FILE

@@ -12,97 +12,199 @@ inputs:
   ssh_private_key:
     description: 'SSH Server private key'
     required: true
+  source_path:
+    description: 'Path to the repository checkout.'
+    required: false
+    default: '.'
+  deployment_dest:
+    description: 'Path to a specific directory to deploy instead of the entire repository, leave blank for whole repository deployment.'
+    required: false
+    default: '.'
+  post_deploy_commands:
+    description: 'Commands to execute on the server after the deployment is complete.'
+    required: false
+    default: ''
+  cleanup_deleted_files:
+    description: 'Delete files from the server that have been removed from the repository.'
+    type: choice
+    required: false
+    default: true
+    options:
+      - "yes"
+      - "no"
+  enable_health_check:
+    description: 'Check WordPress health after deployment and roll back if it fails. Disable to skip this step.'
+    type: choice
+    required: false
+    default: "yes"
+    options:
+      - "yes"
+      - "no"
 
 runs:
   using: 'composite'
   steps:
-    - name: Config action
+    - name: Create Env variables
       id: config
       shell: bash
       run: |
         sudo apt-get update -q && sudo apt-get install -y rsync sshpass
+        
+        OUTPUT_DIR="output"
+        SSH_ROOT_DIR="html"
+        TEMP_KEY_FILE="private_key"
+        ACTION_DIR="action_dir"
+        IGNORE_FILES="$ACTION_DIR/files_to_ignore.txt"
+        SYNC_FILES="$OUTPUT_DIR/files_to_sync.txt"
+        REMOTE_DIR="$SSH_ROOT_DIR/deployer"
+        SSH_AUTH="-i $TEMP_KEY_FILE -o StrictHostKeyChecking=no"
+        TAR_NAME="repository_$(openssl rand -hex 4).tar.gz"
 
-        mkdir -p ~/.ssh output
-        ssh-keyscan -H "${{ inputs.remote_host }}" >> ~/.ssh/known_hosts
-
+        CHECKOUT_DIR=${{ inputs.source_path }}
+        CHECKOUT_DIR="${CHECKOUT_DIR#/}" # Remove leading slash
+        CHECKOUT_DIR="${CHECKOUT_DIR%/}" # Remove trailing slash
+        echo "CHECKOUT_DIR=$CHECKOUT_DIR" >> $GITHUB_ENV
+        
+        DEST_DIR=${{ inputs.deployment_dest }}
+        DEST_DIR="${DEST_DIR#/}" # Remove leading slash
+        DEST_DIR="${DEST_DIR%/}" # Remove trailing slash
+        echo "DEST_DIR=$DEST_DIR" >> $GITHUB_ENV
+        
         ACTION_PATH="${{ github.action_path }}"
         TAG_NAME=$(basename "$ACTION_PATH")
         echo "ACTION_TAG=$TAG_NAME" >> $GITHUB_ENV
-        echo "Tag name: $TAG_NAME"
-
         echo "::set-output name=ACTION_TAG::$TAG_NAME"
-        echo "CHECKOUT_DIR=git_checkout" >> $GITHUB_ENV
-        echo "ACTION_DIR=action_dir" >> $GITHUB_ENV
-        echo "IGNORE_FILE=action_dir/ignore_files.txt" >> $GITHUB_ENV
-        echo "OUTPUT_DIR=output" >> $GITHUB_ENV
-        echo "SYNC_FILE_LIST=output/files_to_sync.txt" >> $GITHUB_ENV
-        echo "REMOTE_DIR=/html/deployer" >> $GITHUB_ENV
+        
+        echo "ACTION_DIR=$ACTION_DIR" >> $GITHUB_ENV
+        echo "IGNORE_FILES=$IGNORE_FILES" >> $GITHUB_ENV
+        echo "OUTPUT_DIR=$OUTPUT_DIR" >> $GITHUB_ENV
+        echo "SYNC_FILES=$SYNC_FILES" >> $GITHUB_ENV
+        echo "DEL_FILE_LIST=$CHECKOUT_DIR/deleted_files.txt" >> $GITHUB_ENV
+        echo "REMOTE_DIR=$REMOTE_DIR" >> $GITHUB_ENV
+        echo "SSH_ROOT_DIR=$SSH_ROOT_DIR" >> $GITHUB_ENV
         echo "SSH_USER=${{ inputs.ssh_user }}" >> $GITHUB_ENV
         echo "SSH_HOST=${{ inputs.remote_host }}" >> $GITHUB_ENV
-
-        TAR_NAME="repository_$(openssl rand -hex 4).tar.gz"
+        echo "SSH_AUTH=$SSH_AUTH" >> $GITHUB_ENV
+        echo "CLEAN_UP=${{ inputs.cleanup_deleted_files }}" >> $GITHUB_ENV
         echo "TAR_NAME=$TAR_NAME" >> $GITHUB_ENV
-        echo "TAR_FILE=output/$TAR_NAME" >> $GITHUB_ENV
-        
-        TEMP_KEY_FILE="private_key"
+        echo "TAR_FILE=$OUTPUT_DIR/$TAR_NAME" >> $GITHUB_ENV
+
+        mkdir -p ~/.ssh $OUTPUT_DIR
+        ssh-keyscan -H "${{ inputs.remote_host }}" >> ~/.ssh/known_hosts
         echo "${{ inputs.ssh_private_key }}" > "$TEMP_KEY_FILE"
         chmod 600 "$TEMP_KEY_FILE"
         echo "TEMP_KEY_FILE=$TEMP_KEY_FILE" >> $GITHUB_ENV
+    - name: Validate inputs
+      shell: bash
+      run: |
+        if [ ! -d "$CHECKOUT_DIR" ]; then
+          echo "The source directory does not exists."
+          exit 1
+        fi
+        
+        if [[ "$DEST_DIR" != "." ]]; then
+          if ! ssh "$SSH_AUTH" "$SSH_USER@$SSH_HOST" "[ -d '/$SSH_ROOT_DIR/$DEST_DIR' ]"; then
+            echo "Error: Directory '/$SSH_ROOT_DIR/$DEST_DIR' does not exist on the server."
+            exit 1
+          fi
+        fi
 
-    - name: Checkout repository
-      with:
-        path: git_checkout
-      uses: actions/checkout@v3
-
-    - name: Checkout Action
+    - name: Checkout action repo
       with:
         path: action_dir
-        repository: narethiya-godaddy/git-deploy-poc
+        repository: narethiya-godaddy/git-deploy-poc # TODO: Change this on prod
         ref: ${{ steps.config.outputs.ACTION_TAG }}
       uses: actions/checkout@v3
 
-    - name: Create tar file
+    - name: Prepare changed and deleted files lists
       shell: bash
       run: |
         EXCLUDE_ARGS=""
         while IFS= read -r line; do
           EXCLUDE_ARGS+="--exclude=$line "
-        done < "$IGNORE_FILE"
-
+        done < "$IGNORE_FILES"
+        
+        echo "ignore list: $EXCLUDE_ARGS"
         echo "Preparing a changed file list..."
-        rsync -av --dry-run --checksum -e "ssh -i $TEMP_KEY_FILE -o StrictHostKeyChecking=no" $EXCLUDE_ARGS $CHECKOUT_DIR/ "$SSH_USER@$SSH_HOST:/html/" | grep -v '/$' > $SYNC_FILE_LIST
-        sed -i '1d;N;$!P;$!D;$d;$d' "$SYNC_FILE_LIST"
-
+        echo "Source: $CHECKOUT_DIR/"
+        echo "Destination: /$SSH_ROOT_DIR/$DEST_DIR/"
+        echo "current dir: $(pwd)"
+        ls -lha
+        echo "rsync command: "
+        echo "rsync -av --dry-run --checksum -e ssh $SSH_AUTH $CHECKOUT_DIR/ $SSH_USER@$SSH_HOST:/$SSH_ROOT_DIR/$DEST_DIR/"
+        
+        rsync -av --dry-run --checksum $EXCLUDE_ARGS \
+          -e "ssh $SSH_AUTH" \
+          $CHECKOUT_DIR/ "$SSH_USER@$SSH_HOST:/$SSH_ROOT_DIR/$DEST_DIR/" \
+          | grep -v '/$' > $SYNC_FILES
+        
+        if [[ $? -ne 0 ]]; then
+          echo "Error: Failed to prepare the list of changed files."
+          exit 1
+        fi
+        
+        sed -i '1d;N;$!P;$!D;$d;$d' "$SYNC_FILES"
         echo "Files to be synchronized:"
-        cat "$SYNC_FILE_LIST"
-        echo "End of list."
+        cat "$SYNC_FILES"
+        echo "--------End of list--------"
 
+        if [ "$CLEAN_UP" = "yes" ]; then
+          touch $DEL_FILE_LIST
+          echo "Preparing a deleted file list..."
+          echo "rsync -av --dry-run --delete --ignore-existing -e 'ssh $SSH_AUTH' $CHECKOUT_DIR/ '$SSH_USER@$SSH_HOST:/$SSH_ROOT_DIR/$DEST_DIR/' | grep '^deleting ' | awk '{print $2}' | grep -v '/$' > $DEL_FILE_LIST"
+        
+          rsync -av --dry-run --delete --ignore-existing $EXCLUDE_ARGS \
+            -e "ssh $SSH_AUTH" \
+            $CHECKOUT_DIR/ "$SSH_USER@$SSH_HOST:/$SSH_ROOT_DIR/$DEST_DIR/" \
+            | grep '^deleting ' | awk '{print $2}' | grep -v '/$' > $DEL_FILE_LIST
+        
+          if [[ $? -ne 0 ]]; then
+            echo "Error: Failed to prepare the list of files to delete."
+            exit 1
+          fi
+        
+          echo $(basename "$DEL_FILE_LIST") >> "$SYNC_FILES"
+          echo "Files to be DELETED:"
+          cat "$DEL_FILE_LIST"
+          echo "--------End of deleted file list--------"
+        fi
+
+    - name: Create tar file
+      shell: bash
+      run: |
+        BASE_DIR=$(pwd)
         cd $CHECKOUT_DIR
         echo "Creating tar file: $TAR_FILE"
-        tar -czvf "../$TAR_FILE" -T "../$SYNC_FILE_LIST"
-        cd ../
+        tar -czvf "$BASE_DIR/$TAR_FILE" -T "$BASE_DIR/$SYNC_FILES"
+        cd $BASE_DIR
         echo "Tar file created successfully."
 
     - name: Upload tar file to server
       shell: bash
       run: |
         echo "Creating remote directory: $REMOTE_DIR"
-        ssh -i $TEMP_KEY_FILE -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "mkdir -p '$REMOTE_DIR' || exit 1"
-        echo "Uploading tar file to $REMOTE_DIR"
+        ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" "mkdir -p '/$REMOTE_DIR' || exit 1"
 
-        rsync -avz --delete -e "ssh -i $TEMP_KEY_FILE -o StrictHostKeyChecking=no" $TAR_FILE "$SSH_USER@$SSH_HOST:$REMOTE_DIR/"
+        echo "Uploading tar file to $REMOTE_DIR"
+        rsync -avz -e "ssh $SSH_AUTH" $TAR_FILE "$SSH_USER@$SSH_HOST:/$REMOTE_DIR/"
         echo "Tar file uploaded successfully."
 
     - name: Clean up
       shell: bash
       run: |
         echo "Cleaning up temporary files..."
-        rm -rf $OUTPUT_DIR $CHECKOUT_DIR $ACTION_DIR
+        rm -rf $OUTPUT_DIR $ACTION_DIR
         echo "Temporary files cleaned up successfully."
 
-    - name: Run Deployer
+    - name: Execute Deployment script
       shell: bash
       run: |
         echo "Run Server deployer"
-        ssh -i $TEMP_KEY_FILE -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "/html/deployer.sh $TAR_NAME || exit 1"
+        POST_COMMAND=${{inputs.post_deploy_commands}}
+        HEALTH_CHECK=${{inputs.enable_health_check}}
+        DEPLOYER_SH="/$SSH_ROOT_DIR/deployer.sh"
+
+        ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" \ 
+          $DEPLOYER_SH $TAR_NAME $DEST_DIR $HEALTH_CHECK $POST_COMMAND
+        
         rm -f $TEMP_KEY_FILE

@@ -42,9 +42,9 @@ runs:
       run: |
         sudo apt-get update -q && sudo apt-get install -y rsync sshpass
 
-        DEPLOYER_APP_DIR="html/git-deployer"
+        DEPLOYER_APP_DIR="html/git-deployer-app"
         WP_ROOT_DIR="html"
-        UPLOAD_DIR="html/git-deployer-upload"
+        UPLOAD_DIR="git-deployer"
 
         ACTION_DIR="action_dir"
         OUTPUT_DIR="output"
@@ -112,7 +112,7 @@ runs:
     - name: Checkout action repo
       with:
         path: action_dir
-        repository: narethiya-godaddy/git-deploy-poc # TODO: Change this on prod
+        repository: godaddy-wordpress/git-deploy-poc
         ref: ${{ steps.config.outputs.ACTION_TAG }}
       uses: actions/checkout@v3
 

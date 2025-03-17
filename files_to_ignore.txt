@@ -22,10 +22,10 @@ wp-settings.php
 wp-signup.php
 wp-trackback.php
 xmlrpc.php
+git-deployer-app/
 platform/
 wp-admin/
 wp-includes/
 wp-content/mu-plugins/
 wp-content/object-cache.php
 wp-content/uploads/
-git-deployer-app/

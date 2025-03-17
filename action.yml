@@ -129,9 +129,6 @@ runs:
         echo "Source: $CHECKOUT_DIR/"
         echo "Destination: /$WP_DEST_DIR/"
         echo "current dir: $(pwd)"
-        ls -lha
-        echo "rsync command: "
-        echo "rsync -av --dry-run --checksum -e ssh $SSH_AUTH $CHECKOUT_DIR/ $SSH_USER@$SSH_HOST:/$WP_DEST_DIR/"
         
         rsync -av --dry-run --checksum $EXCLUDE_ARGS \
           -e "ssh $SSH_AUTH" \
@@ -156,12 +153,12 @@ runs:
             -e "ssh $SSH_AUTH" \
             $CHECKOUT_DIR/ "$SSH_USER@$SSH_HOST:/$WP_DEST_DIR/" \
             | grep '^deleting ' | awk '{print $2}' | grep -v '/$' > $DEL_FILE_LIST
-          
+        
           if [[ $? -ne 0 ]]; then
             echo "Error: Failed to prepare the list of files to delete."
             exit 1
           fi
-          
+        
           echo $(basename "$DEL_FILE_LIST") >> "$SYNC_FILES"
           echo "Files to be DELETED:"
           cat "$DEL_FILE_LIST"
@@ -179,6 +176,7 @@ runs:
         echo "Tar file created successfully."
 
     - name: Upload tar file to server
+      id: upload
       shell: bash
       run: |
         echo "Creating remote directory: $UPLOAD_DIR"
@@ -212,3 +210,11 @@ runs:
         ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" $DEPLOYER_SH $TAR_NAME $OPTIONS 
 
         rm -f $TEMP_KEY_FILE
+
+    - name: Cleanup Uploaded Tar File on Failure
+      shell: bash
+      if: failure() && steps.upload.outcome == 'success'
+      run: |
+        echo "Deleting uploaded tar file"
+        ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" "rm -f '/$UPLOAD_DIR/$TAR_FILE'"
+

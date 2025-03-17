@@ -50,7 +50,7 @@ runs:
         OUTPUT_DIR="output"
         IGNORE_FILES="$ACTION_DIR/files_to_ignore.txt"
         SYNC_FILES="$OUTPUT_DIR/files_to_sync.txt"
-        TEMP_KEY_FILE="private_key"             
+        TEMP_KEY_FILE="$(pwd)/private_key"
         SSH_AUTH="-i $TEMP_KEY_FILE -o StrictHostKeyChecking=no"
         TAR_NAME="repository_$(openssl rand -hex 4).tar"
 

@@ -108,6 +108,7 @@ runs:
         cat "$TEMP_KEY_FILE"
         echo "------------------------"
         ls -lha
+        pwd
 
         if [[ "$WP_DEST_DIR" != "$WP_ROOT_DIR" ]]; then
           if ! ssh "$SSH_AUTH" "$SSH_USER@$SSH_HOST" "[ -d '/$WP_DEST_DIR' ]"; then

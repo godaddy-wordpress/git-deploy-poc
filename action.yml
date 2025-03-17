@@ -102,8 +102,9 @@ runs:
           exit 1
         fi
 
-        echo "-------secrets------------------------"
+        echo "-------secrets-------"
         echo "${{ inputs.ssh_private_key }}"
+        echo "-------TEMP FILE-------"
         cat "$TEMP_KEY_FILE"
         echo "------------------------"
 

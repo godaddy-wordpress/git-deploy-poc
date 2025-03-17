@@ -159,9 +159,8 @@ runs:
 
           rsync -av --dry-run --delete --ignore-existing $EXCLUDE_ARGS \
             -e "ssh $SSH_AUTH" \
-            $CHECKOUT_DIR/ "$SSH_USER@$SSH_HOST:/$WP_DEST_DIR/" \
-            | grep '^deleting ' || true \
-            | awk '{print $2}' | grep -v '/$' > $DEL_FILE_LIST
+            "$CHECKOUT_DIR/" "$SSH_USER@$SSH_HOST:/$WP_DEST_DIR/" \
+            | grep '^deleting ' 2>/dev/null | awk '{print $2}' | grep -v '/$' > "$DEL_FILE_LIST" || true
         
           if [[ $? -ne 0 ]]; then
             echo "Error: Failed to prepare the list of files to delete."

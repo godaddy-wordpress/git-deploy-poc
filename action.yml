@@ -218,7 +218,7 @@ runs:
         fi
 
         echo "SSH Command: ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" $DEPLOYER_SH $TAR_NAME $OPTIONS"; 
-        ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" $DEPLOYER_SH $TAR_NAME $OPTIONS 
+        ssh -i "$TEMP_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" $DEPLOYER_SH $TAR_NAME $OPTIONS 
 
         rm -f $TEMP_KEY_FILE
 
@@ -227,5 +227,5 @@ runs:
       if: failure() && steps.upload.outcome == 'success'
       run: |
         echo "Deleting uploaded tar file"
-        ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" "rm -f '/$UPLOAD_DIR/$TAR_FILE'"
+        ssh -i "$TEMP_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "rm -f '/$UPLOAD_DIR/$TAR_FILE'"
 

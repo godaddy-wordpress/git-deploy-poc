@@ -222,5 +222,5 @@ runs:
       if: failure() && steps.upload.outcome == 'success'
       run: |
         echo "Deleting uploaded tar file"
-        ssh -i "$TEMP_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "rm -f '/$UPLOAD_DIR/$TAR_FILE'"
+        ssh -i "$TEMP_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "rm -f '/$UPLOAD_DIR/$TAR_NAME'"
 

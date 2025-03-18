@@ -51,7 +51,7 @@ runs:
         IGNORE_FILES="$ACTION_DIR/files_to_ignore.txt"
         SYNC_FILES="$OUTPUT_DIR/files_to_sync.txt"
         TEMP_KEY_FILE="$(pwd)/private_key"
-        SSH_AUTH="-i $TEMP_KEY_FILE -o StrictHostKeyChecking=no"
+        SSH_AUTH="-i '$TEMP_KEY_FILE' -o StrictHostKeyChecking=no"
         TAR_NAME="repository_$(openssl rand -hex 4).tar"
 
         CHECKOUT_DIR=${{ inputs.source_path }}

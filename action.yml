@@ -73,7 +73,8 @@ runs:
         ACTION_PATH="${{ github.action_path }}"
         TAG_NAME=$(basename "$ACTION_PATH")
         echo "ACTION_TAG=$TAG_NAME" >> $GITHUB_ENV
-        echo "::set-output name=ACTION_TAG::$TAG_NAME"
+        echo "ACTION_TAG=$TAG_NAME" >> $GITHUB_OUTPUT
+      
         
         echo "ACTION_DIR=$ACTION_DIR" >> $GITHUB_ENV
         echo "IGNORE_FILES=$IGNORE_FILES" >> $GITHUB_ENV

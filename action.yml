@@ -51,7 +51,8 @@ runs:
         IGNORE_FILES="$ACTION_DIR/files_to_ignore.txt"
         SYNC_FILES="$OUTPUT_DIR/files_to_sync.txt"
         TEMP_KEY_FILE="$(pwd)/private_key"
-        SSH_AUTH="-i \"$TEMP_KEY_FILE\" -o StrictHostKeyChecking=no"
+        SSH_AUTH=(-i "$TEMP_KEY_FILE" -o StrictHostKeyChecking=no)
+
         TAR_NAME="repository_$(openssl rand -hex 4).tar"
 
         CHECKOUT_DIR=${{ inputs.source_path }}
@@ -113,7 +114,8 @@ runs:
         echo "WP_ROOT_DIR: $WP_ROOT_DIR"
 
         if [[ "$WP_DEST_DIR" != "$WP_ROOT_DIR" ]]; then
-          if ! ssh "$SSH_AUTH" "$SSH_USER@$SSH_HOST" "[ -d '/$WP_DEST_DIR' ]"; then
+          if ! ssh "${SSH_AUTH[@]}" "$SSH_USER@$SSH_HOST" "[ -d '$WP_DEST_DIR' ]"; then
+
             echo "Error: Directory '/$WP_DEST_DIR' does not exist on the server."
             exit 1
           fi
@@ -141,7 +143,7 @@ runs:
         echo "current dir: $(pwd)"
         
         rsync -av --dry-run --checksum $EXCLUDE_ARGS \
-          -e "ssh $SSH_AUTH" \
+          -e "ssh "${SSH_AUTH[@]}" \
           $CHECKOUT_DIR/ "$SSH_USER@$SSH_HOST:/$WP_DEST_DIR/" \
           | grep -v '/$' > $SYNC_FILES
         
@@ -160,7 +162,7 @@ runs:
           echo "Preparing a deleted file list..."
 
           rsync -av --dry-run --delete --ignore-existing $EXCLUDE_ARGS \
-            -e "ssh $SSH_AUTH" \
+            -e "ssh ${SSH_AUTH[@]}" \
             "$CHECKOUT_DIR/" "$SSH_USER@$SSH_HOST:/$WP_DEST_DIR/" \
             | grep '^deleting ' 2>/dev/null | awk '{print $2}' | grep -v '/$' > "$DEL_FILE_LIST" || true
         
@@ -190,10 +192,10 @@ runs:
       shell: bash
       run: |
         echo "Creating remote directory: $UPLOAD_DIR"
-        ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" "mkdir -p '/$UPLOAD_DIR' || exit 1"
+        ssh "${SSH_AUTH[@]}" "$SSH_USER@$SSH_HOST" "mkdir -p '/$UPLOAD_DIR' || exit 1"
 
         echo "Uploading tar file to $UPLOAD_DIR"
-        rsync -avz -e "ssh $SSH_AUTH" $TAR_FILE "$SSH_USER@$SSH_HOST:/$UPLOAD_DIR/"
+        rsync -avz -e "ssh ${SSH_AUTH[@]}" $TAR_FILE "$SSH_USER@$SSH_HOST:/$UPLOAD_DIR/"
         echo "Tar file uploaded successfully."
 
     - name: Clean up
@@ -216,8 +218,8 @@ runs:
           OPTIONS="$OPTIONS --skipHealthCheck"
         fi
 
-        echo "SSH Command: ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" $DEPLOYER_SH $TAR_NAME $OPTIONS"; 
-        ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" $DEPLOYER_SH $TAR_NAME $OPTIONS 
+        echo "SSH Command: ssh ${SSH_AUTH[@]} "$SSH_USER@$SSH_HOST" $DEPLOYER_SH $TAR_NAME $OPTIONS"; 
+        ssh "${SSH_AUTH[@]}" "$SSH_USER@$SSH_HOST" $DEPLOYER_SH $TAR_NAME $OPTIONS 
 
         rm -f $TEMP_KEY_FILE
 
@@ -226,5 +228,5 @@ runs:
       if: failure() && steps.upload.outcome == 'success'
       run: |
         echo "Deleting uploaded tar file"
-        ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" "rm -f '/$UPLOAD_DIR/$TAR_FILE'"
+        ssh "${SSH_AUTH[@]}" "$SSH_USER@$SSH_HOST" "rm -f '/$UPLOAD_DIR/$TAR_FILE'"
 

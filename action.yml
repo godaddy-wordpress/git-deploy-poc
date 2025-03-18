@@ -196,7 +196,6 @@ runs:
       shell: bash
       run: |
         echo "Cleaning up temporary files..."
-        exit 1
         rm -rf $OUTPUT_DIR $ACTION_DIR
         echo "Temporary files cleaned up successfully."
 

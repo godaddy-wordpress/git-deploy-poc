@@ -109,6 +109,8 @@ runs:
         echo "------------------------"
         ls -lha
         pwd
+        echo "WP_DEST_DIR: $WP_DEST_DIR"
+        echo "WP_ROOT_DIR: $WP_ROOT_DIR"
 
         if [[ "$WP_DEST_DIR" != "$WP_ROOT_DIR" ]]; then
           if ! ssh "$SSH_AUTH" "$SSH_USER@$SSH_HOST" "[ -d '/$WP_DEST_DIR' ]"; then

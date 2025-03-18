@@ -191,7 +191,7 @@ runs:
       shell: bash
       run: |
         echo "Creating remote directory: $UPLOAD_DIR"
-        ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" "mkdir -p '/$UPLOAD_DIR' || exit 1"
+        ssh -i "$TEMP_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "mkdir -p '/$UPLOAD_DIR' || exit 1"
 
         echo "Uploading tar file to $UPLOAD_DIR"
         rsync -avz -e "ssh $SSH_AUTH" $TAR_FILE "$SSH_USER@$SSH_HOST:/$UPLOAD_DIR/"

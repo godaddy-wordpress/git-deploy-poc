@@ -98,20 +98,16 @@ runs:
     - name: Validate inputs
       shell: bash
       run: |
+        TRIMMED_KEY="$(echo "${{ inputs.ssh_private_key }}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        if [[ -z "$TRIMMED_KEY" ]]; then
+          echo "Error: SSH private key is missing."
+          exit 1
+        fi
+
         if [ ! -d "$CHECKOUT_DIR" ]; then
           echo "The source directory does not exists."
           exit 1
         fi
-
-        echo "-------secrets-------"
-        echo "${{ inputs.ssh_private_key }}"
-        echo "-------TEMP FILE-------"
-        cat "$TEMP_KEY_FILE"
-        echo "------------------------"
-        ls -lha
-        pwd
-        echo "WP_DEST_DIR: $WP_DEST_DIR"
-        echo "WP_ROOT_DIR: $WP_ROOT_DIR"
 
         if [[ "$WP_DEST_DIR" != "$WP_ROOT_DIR" ]]; then
           if ! ssh -i "$TEMP_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "[ -d '/$WP_DEST_DIR' ]"; then
@@ -135,7 +131,6 @@ runs:
           EXCLUDE_ARGS+="--exclude=$line "
         done < "$IGNORE_FILES"
         
-        echo "ignore list: $EXCLUDE_ARGS"
         echo "Preparing a changed file list..."
         echo "Source: $CHECKOUT_DIR/"
         echo "Destination: /$WP_DEST_DIR/"
@@ -216,8 +211,7 @@ runs:
         if [ "$HEALTH_CHECK" == "no" ]; then
           OPTIONS="$OPTIONS --skipHealthCheck"
         fi
-
-        echo "SSH Command: ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" $DEPLOYER_SH $TAR_NAME $OPTIONS"; 
+ 
         ssh -i "$TEMP_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" $DEPLOYER_SH $TAR_NAME $OPTIONS 
 
         rm -f $TEMP_KEY_FILE

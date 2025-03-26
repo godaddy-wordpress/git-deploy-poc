@@ -50,8 +50,9 @@ runs:
         OUTPUT_DIR="output"
         IGNORE_FILES="$ACTION_DIR/files_to_ignore.txt"
         SYNC_FILES="$OUTPUT_DIR/files_to_sync.txt"
-        TEMP_KEY_FILE="private_key"             
-        SSH_AUTH="-i $TEMP_KEY_FILE -o StrictHostKeyChecking=no"
+        TEMP_KEY_FILE="$(pwd)/private_key"
+        SSH_AUTH="-i \"$TEMP_KEY_FILE\" -o StrictHostKeyChecking=no"
+
         TAR_NAME="repository_$(openssl rand -hex 4).tar"
 
         CHECKOUT_DIR=${{ inputs.source_path }}
@@ -72,7 +73,8 @@ runs:
         ACTION_PATH="${{ github.action_path }}"
         TAG_NAME=$(basename "$ACTION_PATH")
         echo "ACTION_TAG=$TAG_NAME" >> $GITHUB_ENV
-        echo "::set-output name=ACTION_TAG::$TAG_NAME"
+        echo "ACTION_TAG=$TAG_NAME" >> $GITHUB_OUTPUT
+      
         
         echo "ACTION_DIR=$ACTION_DIR" >> $GITHUB_ENV
         echo "IGNORE_FILES=$IGNORE_FILES" >> $GITHUB_ENV
@@ -91,19 +93,25 @@ runs:
 
         mkdir -p ~/.ssh $OUTPUT_DIR
         ssh-keyscan -H "${{ inputs.remote_host }}" >> ~/.ssh/known_hosts
-        echo "${{ inputs.ssh_private_key }}" > "$TEMP_KEY_FILE"
+        echo -e "${{ inputs.ssh_private_key }}" > "$TEMP_KEY_FILE"
         chmod 600 "$TEMP_KEY_FILE"
         echo "TEMP_KEY_FILE=$TEMP_KEY_FILE" >> $GITHUB_ENV
     - name: Validate inputs
       shell: bash
       run: |
+        TRIMMED_KEY="$(echo "${{ inputs.ssh_private_key }}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        if [[ -z "$TRIMMED_KEY" ]]; then
+          echo "Error: SSH private key is missing."
+          exit 1
+        fi
+
         if [ ! -d "$CHECKOUT_DIR" ]; then
           echo "The source directory does not exists."
           exit 1
         fi
 
         if [[ "$WP_DEST_DIR" != "$WP_ROOT_DIR" ]]; then
-          if ! ssh "$SSH_AUTH" "$SSH_USER@$SSH_HOST" "[ -d '/$WP_DEST_DIR' ]"; then
+          if ! ssh -i "$TEMP_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "[ -d '/$WP_DEST_DIR' ]"; then
             echo "Error: Directory '/$WP_DEST_DIR' does not exist on the server."
             exit 1
           fi
@@ -124,14 +132,10 @@ runs:
           EXCLUDE_ARGS+="--exclude=$line "
         done < "$IGNORE_FILES"
         
-        echo "ignore list: $EXCLUDE_ARGS"
         echo "Preparing a changed file list..."
         echo "Source: $CHECKOUT_DIR/"
         echo "Destination: /$WP_DEST_DIR/"
         echo "current dir: $(pwd)"
-        ls -lha
-        echo "rsync command: "
-        echo "rsync -av --dry-run --checksum -e ssh $SSH_AUTH $CHECKOUT_DIR/ $SSH_USER@$SSH_HOST:/$WP_DEST_DIR/"
         
         rsync -av --dry-run --checksum $EXCLUDE_ARGS \
           -e "ssh $SSH_AUTH" \
@@ -154,14 +158,14 @@ runs:
 
           rsync -av --dry-run --delete --ignore-existing $EXCLUDE_ARGS \
             -e "ssh $SSH_AUTH" \
-            $CHECKOUT_DIR/ "$SSH_USER@$SSH_HOST:/$WP_DEST_DIR/" \
-            | grep '^deleting ' | awk '{print $2}' | grep -v '/$' > $DEL_FILE_LIST
-          
+            "$CHECKOUT_DIR/" "$SSH_USER@$SSH_HOST:/$WP_DEST_DIR/" \
+            | grep '^deleting ' 2>/dev/null | awk '{print $2}' | grep -v '/$' > "$DEL_FILE_LIST" || true
+        
           if [[ $? -ne 0 ]]; then
             echo "Error: Failed to prepare the list of files to delete."
             exit 1
           fi
-          
+        
           echo $(basename "$DEL_FILE_LIST") >> "$SYNC_FILES"
           echo "Files to be DELETED:"
           cat "$DEL_FILE_LIST"
@@ -179,10 +183,11 @@ runs:
         echo "Tar file created successfully."
 
     - name: Upload tar file to server
+      id: upload
       shell: bash
       run: |
         echo "Creating remote directory: $UPLOAD_DIR"
-        ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" "mkdir -p '/$UPLOAD_DIR' || exit 1"
+        ssh -i "$TEMP_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "mkdir -p '/$UPLOAD_DIR' || exit 1"
 
         echo "Uploading tar file to $UPLOAD_DIR"
         rsync -avz -e "ssh $SSH_AUTH" $TAR_FILE "$SSH_USER@$SSH_HOST:/$UPLOAD_DIR/"
@@ -207,8 +212,15 @@ runs:
         if [ "$HEALTH_CHECK" == "no" ]; then
           OPTIONS="$OPTIONS --skipHealthCheck"
         fi
-
-        echo "SSH Command: ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" $DEPLOYER_SH $TAR_NAME $OPTIONS"; 
-        ssh $SSH_AUTH "$SSH_USER@$SSH_HOST" $DEPLOYER_SH $TAR_NAME $OPTIONS 
+ 
+        ssh -i "$TEMP_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" $DEPLOYER_SH $TAR_NAME $OPTIONS 
 
         rm -f $TEMP_KEY_FILE
+
+    - name: Cleanup Uploaded Tar File on Failure
+      shell: bash
+      if: failure() && steps.upload.outcome == 'success'
+      run: |
+        echo "Deleting uploaded tar file"
+        ssh -i "$TEMP_KEY_FILE" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "rm -f '/$UPLOAD_DIR/$TAR_NAME'"
+
